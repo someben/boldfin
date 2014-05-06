@@ -4,12 +4,19 @@
     <script src="quandl-creds.js" type="text/javascript"></script>
     <script language="JavaScript">
 
+function toConsole() {
+  if (window.console) {
+    window.console.log.apply(window.console, arguments);
+  }
+}
+
 $(document).ready(function() {
   var url = "http://www.quandl.com/api/v1/datasets/FRED/GDP.json?auth_token=" + getQuandlCredentials().authToken;
+  toConsole("About to call out to Quandl API w/ URL:", url);
   $.ajax({
     url: url
   }).done(function(data) {
-    console.log("Got data back from Quandl", data);
+    toConsole("Got data back from Quandl", data);
   });
 });
     </script>
