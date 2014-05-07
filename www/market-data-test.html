@@ -4,22 +4,184 @@
     <script src=".quandl-creds.js" type="text/javascript"></script>
     <script language="JavaScript">
 
+// technique from "http://stackoverflow.com/questions/11887934/check-if-daylight-saving-time-is-in-effect-and-if-it-is-for-how-many-hours"
+Date.prototype.getStdTimezoneOffset = function() {
+  var jan = new Date(this.getFullYear(), 0, 1);
+  var jul = new Date(this.getFullYear(), 6, 1);
+  return Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+}
+
+Date.prototype.isDst = function() {
+  return this.getTimezoneOffset() < this.getStdTimezoneOffset();
+}
+
 function toConsole() {
   if (window.console) {
     window.console.log.apply(window.console, arguments);
   }
 }
 
-$(document).ready(function() {
-  var url = "http://www.quandl.com/api/v1/datasets/FRED/GDP.json?auth_token=" + getQuandlCredentials().authToken;
+function _getQuandlStockPriceTimeSeries(exch, ticker) {
+  var url = "http://www.quandl.com/api/v1/datasets/GOOG/" + exch + "_" + ticker;
+  if (getQuandlCredentials().authToken) {
+    url += "?auth_token=" + getQuandlCredentials().authToken;
+  }
+  else {
+    toConsole("Requesting URL anonymously", url);
+  }
+
   toConsole("About to call out to Quandl API w/ URL:", url);
+  var data = null;
   $.ajax({
-    url: url
-  }).done(function(data) {
-    toConsole("Got data back from Quandl", data);
+    url: url,
+    async: false,
+    success: function(ajaxResult) {
+      toConsole("Got data back from Quandl", ajaxResult);
+      data = ajaxResult;
+    }
   });
+  return data;
+}
+
+var tmpData = null;
+function tmpCallback(data) { tmpData = data; }
+function getQuandlStockPriceTimeSeries(exch, ticker) { return tmpData; }
+
+function getStockPriceTimeSeries(exch, ticker) {
+  var ts = {};
+  var quandlTs = getQuandlStockPriceTimeSeries(exch, ticker);
+  for (var j=0; j < quandlTs.data.length; j++) {
+    var tsRow = {};
+    var tsRowTime = null;
+    for (var i=0; i < quandlTs.column_names.length; i++) {
+      var featureName = quandlTs.column_names[i].toLowerCase();
+      var featureVal = quandlTs.data[j][i];
+      if (featureName == "date") {
+        var quandlTsRowTimeTz = ((new Date(featureVal).isDst()) ? "-04:00" : "-05:00");
+        tsRowTime = new Date(featureVal + "T16:30:00" + quandlTsRowTimeTz) / 1000;
+      }
+      else {
+        tsRow[featureName] = featureVal;
+      }
+    }
+    ts[tsRowTime] = tsRow;
+  }
+  return ts;
+}
+
+function cloneTimeSeries(ts, featureNamePrefix) {
+  var newTs = {};
+  for (var t in ts) {
+    newTs[t] = {};
+    for (var featureName in ts[t]) {
+      var newFeatureName = null;
+      if (typeof featureNamePrefix == "undefined") {
+        newFeatureName = featureName;
+      }
+      else {
+        newFeatureName = featureNamePrefix + featureName;
+      }
+      newTs[t][newFeatureName] = ts[t][featureName];
+    }
+  }
+  return newTs;
+}
+
+function getTimeSeriesTimes(ts) {
+  var tsTimes = [];
+  for (var t in ts) {
+    tsTimes.push(t);
+  }
+  tsTimes.sort();
+  return tsTimes;
+}
+
+function getTimeSeriesFeatureNames(ts) {
+  var featureNames = [];
+  for (var t in ts) {
+    for (var featureName in ts[t]) {
+      if (featureNames.indexOf(featureName) == -1) {
+        featureNames.push(featureName);
+      }
+    }
+  }
+  featureNames.sort();
+  return featureNames;
+}
+
+function addDiffFeatures(ts, featureName, diffWin, diffFn) {
+  var newTs = cloneTimeSeries(ts);
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  for (var i = diffWin; i < tsRowTimes.length; i++) {
+    var tsRowTime1 = tsRowTimes[i - diffWin];
+    var tsRowTime2 = tsRowTimes[i];
+    if (ts[tsRowTime1][featureName] && ts[tsRowTime2][featureName]) {
+      var diffFeatureVal = diffFn(ts[tsRowTime1][featureName], ts[tsRowTime2][featureName]);
+      var diffFeatureName = featureName + "(-" + diffWin + ")";
+      newTs[tsRowTime2][diffFeatureName] = diffFeatureVal;
+    }
+  }
+  return newTs;
+};
+
+function mergeTimeSeries(ts1, ts2) {
+  var newTs = cloneTimeSeries(ts1);
+  for (var t in ts2) {
+    if (! newTs[t]) {
+      newTs[t] = {};
+    }
+    for (var featureName in ts2[t]) {
+      newTs[t][featureName] = ts2[t][featureName];
+    }
+  }
+  return newTs;
+}
+
+function getSymbolTimeSeries(syms, diffWin, diffFn) {
+  var ts = null;
+  for (var i=0; i < syms.length; i++) {
+    var sym = syms[i];
+    var symEls = sym.split(":");
+    var ticker = symEls[0];
+    var exch = symEls[1];
+
+    var symTs = getStockPriceTimeSeries(exch, ticker);
+    var featureNames = getTimeSeriesFeatureNames(symTs);
+    for (var j=0; j < featureNames.length; j++) {
+      var featureName = featureNames[j];
+      toConsole("Adding difference features", sym, featureName);
+      for (var diffWin1 = 1; diffWin1 <= diffWin; diffWin1++) {
+        symTs = addDiffFeatures(symTs, featureName, diffWin1, diffFn);
+      }
+    }
+    symTs = cloneTimeSeries(symTs, sym + ":");
+    if (ts) {
+      ts = mergeTimeSeries(ts, symTs);
+    }
+    else {
+      ts = symTs;
+    }
+  }
+  return ts;
+}
+
+$(document).ready(function() {
+  var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
+  var diffWin = 3;
+  var deltaFn = function(x1, x2) {
+    return (x2 - x1) / x1;
+  };
+  var logRetFn = function(x1, x2) {
+    return Math.log(x2 / x1);
+  };
+  var ts = getSymbolTimeSeries(syms, diffWin, deltaFn);
+  toConsole("ts", ts);
+  // TODO add the target / dependent variable
+  // TODO add a filter to remove extra sparse examples
+  // TODO add a feature normalization process
 });
     </script>
+    <script src="../data/tmp_NASDAQ_NFLX.js" type="text/javascript"></script>
   </head>
 
   <body>
