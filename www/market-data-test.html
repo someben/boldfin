@@ -15,6 +15,58 @@ Date.prototype.isDst = function() {
   return this.getTimezoneOffset() < this.getStdTimezoneOffset();
 }
 
+var Dist = {
+  eachNum: function(xs, fn) {
+    var result = null;
+    for (var i=0; i < xs.length; i++) {
+      var x = xs[i];
+      if (isNaN(x)) {
+        continue;
+      }
+      result = fn(x);
+    }
+    return result;
+  },
+
+  getLength: function(xs) {
+    var num = 0;
+    this.eachNum(xs, function(x) { num += 1 });
+    return num;
+  },
+
+  getMean: function(xs) {
+    var sum = 0;
+    this.eachNum(xs, function(x) { sum += x });
+    return sum / this.getLength(xs);
+  },
+
+  getSquaredDifferenceSum: function(xs) {
+    var mean = this.getMean(xs);
+    var sum = 0;
+    this.eachNum(xs, function(x) {
+      var xSqDiff = x - mean;
+      sum += xSqDiff * xSqDiff;
+    });
+    return sum;
+  },
+
+  getVariance: function(xs) {
+    return this.getSquaredDifferenceSum(xs) / (this.getLength(xs) - 1);
+  },
+
+  getPopulationVariance: function(xs) {
+    return this.getSquaredDifferenceSum(xs) / this.getLength(xs);
+  },
+
+  getStandardDeviation: function(xs) {
+    return Math.sqrt(this.getVariance(xs));
+  },
+
+  getPopulationStandardDeviation: function(xs) {
+    return Math.sqrt(this.getPopulationVariance(xs));
+  }
+};
+
 function toConsole() {
   if (window.console) {
     window.console.log.apply(window.console, arguments);
@@ -117,9 +169,32 @@ function addDiffFeatures(ts, featureName, diffWin, diffFn) {
     var tsRowTime2 = tsRowTimes[i];
     if (ts[tsRowTime1][featureName] && ts[tsRowTime2][featureName]) {
       var diffFeatureVal = diffFn(ts[tsRowTime1][featureName], ts[tsRowTime2][featureName]);
-      var diffFeatureName = featureName + "(-" + diffWin + ")";
+      if (! diffFeatureVal) {
+        continue;
+      }
+      var diffFeatureName = featureName + "(-" + diffWin + " diff)";
       newTs[tsRowTime2][diffFeatureName] = diffFeatureVal;
     }
+  }
+  return newTs;
+};
+
+function addVarFeatures(ts, featureName, varWin, varFn) {
+  var newTs = cloneTimeSeries(ts);
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  for (var i = varWin; i < tsRowTimes.length; i++) {
+    var tsRowTime2 = tsRowTimes[i];
+    var featureVals = [];
+    for (var tIndex = i - varWin; tIndex <= i; tIndex++) {
+      var t = tsRowTimes[tIndex];
+      featureVals.push(ts[t][featureName]);
+    }
+    var varFeatureVal = varFn(featureVals);
+    if (! varFeatureVal) {
+      continue;
+    }
+    var varFeatureName = featureName + "(-" + varWin + " var)";
+    newTs[tsRowTime2][varFeatureName] = varFeatureVal;
   }
   return newTs;
 };
@@ -137,7 +212,7 @@ function mergeTimeSeries(ts1, ts2) {
   return newTs;
 }
 
-function getSymbolTimeSeries(syms, diffWin, diffFn) {
+function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn) {
   var ts = null;
   for (var i=0; i < syms.length; i++) {
     var sym = syms[i];
@@ -152,6 +227,10 @@ function getSymbolTimeSeries(syms, diffWin, diffFn) {
       toConsole("Adding difference features", sym, featureName);
       for (var diffWin1 = 1; diffWin1 <= diffWin; diffWin1++) {
         symTs = addDiffFeatures(symTs, featureName, diffWin1, diffFn);
+      }
+      toConsole("Adding variance features", sym, featureName);
+      for (var varWin1 = 1; varWin1 <= varWin; varWin1++) {
+        symTs = addVarFeatures(symTs, featureName, varWin1, varFn);
       }
     }
     symTs = cloneTimeSeries(symTs, sym + ":");
@@ -168,13 +247,17 @@ function getSymbolTimeSeries(syms, diffWin, diffFn) {
 $(document).ready(function() {
   var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
   var diffWin = 3;
+  var varWin = 5;
   var deltaFn = function(x1, x2) {
     return (x2 - x1) / x1;
   };
   var logRetFn = function(x1, x2) {
     return Math.log(x2 / x1);
   };
-  var ts = getSymbolTimeSeries(syms, diffWin, deltaFn);
+  var stdevFn = function(xs) {
+    return Dist.getStandardDeviation(xs);
+  };
+  var ts = getSymbolTimeSeries(syms, diffWin, deltaFn, varWin, stdevFn);
   toConsole("ts", ts);
   // TODO add the target / dependent variable
   // TODO add a filter to remove extra sparse examples
