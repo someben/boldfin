@@ -298,13 +298,47 @@ function selectTimeSeriesRows(ts, fn) {
 };
 
 function removeSparseTimeSeriesRows(ts, sparsityFilter) {
-  toConsole("Built time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
   var minNumDims = Math.round(getTimeSeriesDimensionality(ts) * sparsityFilter);
   ts = selectTimeSeriesRows(ts, function(t, tsRow) {
     return getTimeSeriesRowFeatureNames(tsRow).length >= minNumDims;
   });
   toConsole("Filtered down to time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
   return ts;
+}
+
+function mapTimeSeriesFeatureVals(ts, featureName, fn) {
+  var newTs = {};
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  for (var i=0; i < tsRowTimes.length; i++) {
+    var t = tsRowTimes[i];
+    newTs[t] = cloneTimeSeriesRow(ts[t]);
+    var newFeatureVal = fn(t, ts[t][featureName]);
+    newTs[t][featureName] = newFeatureVal;
+  }
+  return newTs;
+}
+
+function standardizeTimeSeries(ts) {
+  var newTs = cloneTimeSeries(ts);
+  var featureNames = getTimeSeriesFeatureNames(ts);
+  var featureDist = {};
+  for (var i=0; i < featureNames.length; i++) {
+    var featureName = featureNames[i];
+    featureDist[featureName] = {};
+
+    var featureVals = [];
+    mapTimeSeriesFeatureVals(ts, featureName, function(t, featureVal) { featureVals.push(featureVal); });
+    featureDist[featureName].mean = Dist.getMean(featureVals);
+    featureDist[featureName].stdev = Dist.getStandardDeviation(featureVals);
+    toConsole("For feature", featureName, "found", featureDist[featureName].mean, "mean", featureDist[featureName].stdev, "standard deviation");
+    newTs = mapTimeSeriesFeatureVals(newTs, featureName, function(t, featureVal) {
+      return (featureVal - featureDist[featureName].mean) / featureDist[featureName].stdev;
+    });
+  }
+  return {
+    ts: newTs,
+    featureDist: featureDist
+  };
 }
 
 $(document).ready(function() {
@@ -331,8 +365,11 @@ $(document).ready(function() {
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, deltaFn);
   toConsole("Extracted target time series", targetFeatureName, targetTs);
+  toConsole("Built time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
   ts = removeSparseTimeSeriesRows(ts, sparsityFilter);
-  // TODO add a feature normalization process
+  result = standardizeTimeSeries(ts);
+  stdTs = result.ts; featureDist = result.featureDist;
+  toConsole("Standardized time series", stdTs);
 });
     </script>
     <script src="../data/tmp_NASDAQ_NFLX.js" type="text/javascript"></script>
