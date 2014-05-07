@@ -121,20 +121,25 @@ function getStockPriceTimeSeries(exch, ticker) {
   return ts;
 }
 
+function cloneTimeSeriesRow(tsRow, featureNamePrefix) {
+  var newTsRow = {}
+  for (var featureName in tsRow) {
+    var newFeatureName = null;
+    if (typeof featureNamePrefix == "undefined") {
+      newFeatureName = featureName;
+    }
+    else {
+      newFeatureName = featureNamePrefix + featureName;
+    }
+    newTsRow[newFeatureName] = tsRow[featureName];
+  }
+  return newTsRow;
+}
+
 function cloneTimeSeries(ts, featureNamePrefix) {
   var newTs = {};
   for (var t in ts) {
-    newTs[t] = {};
-    for (var featureName in ts[t]) {
-      var newFeatureName = null;
-      if (typeof featureNamePrefix == "undefined") {
-        newFeatureName = featureName;
-      }
-      else {
-        newFeatureName = featureNamePrefix + featureName;
-      }
-      newTs[t][newFeatureName] = ts[t][featureName];
-    }
+    newTs[t] = cloneTimeSeriesRow(ts[t], featureNamePrefix);
   }
   return newTs;
 }
@@ -148,6 +153,19 @@ function getTimeSeriesTimes(ts) {
   return tsTimes;
 }
 
+function getTimeSeriesRowFeatureNames(tsRow) {
+  var tsRowFeatureNames = [];
+  for (var featureName in tsRow) {
+    tsRowFeatureNames.push(featureName);
+  }
+  tsRowFeatureNames.sort();
+  return tsRowFeatureNames;
+}
+
+function getTimeSeriesLength(ts) {
+  return getTimeSeriesTimes(ts).length;
+}
+
 function getTimeSeriesFeatureNames(ts) {
   var featureNames = [];
   for (var t in ts) {
@@ -159,6 +177,10 @@ function getTimeSeriesFeatureNames(ts) {
   }
   featureNames.sort();
   return featureNames;
+}
+
+function getTimeSeriesDimensionality(ts) {
+  return getTimeSeriesFeatureNames(ts).length;
 }
 
 function addDiffFeatures(ts, featureName, diffWin, diffFn) {
@@ -244,10 +266,56 @@ function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn) {
   return ts;
 }
 
+function extractForecastTimeSeries(ts, featureName, forecastWin, diffFn) {
+  var newTs = {};
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  for (var i=0; i < tsRowTimes.length - forecastWin; i++) {
+    var tsRowTime1 = tsRowTimes[i];
+    var tsRowTime2 = tsRowTimes[i + forecastWin];
+    newTs[tsRowTime1] = {};
+    if (ts[tsRowTime1][featureName] && ts[tsRowTime2][featureName]) {
+      var diffFeatureVal = diffFn(ts[tsRowTime1][featureName], ts[tsRowTime2][featureName]);
+      if (! diffFeatureVal) {
+        continue;
+      }
+      var forecastFeatureName = featureName + "(+" + forecastWin + " fwd)";
+      newTs[tsRowTime1][forecastFeatureName] = diffFeatureVal;
+    }
+  }
+  return newTs;
+};
+
+function selectTimeSeriesRows(ts, fn) {
+  var newTs = {};
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  for (var i=0; i < tsRowTimes.length; i++) {
+    var t = tsRowTimes[i];
+    if (fn(t, ts[t])) {
+      newTs[t] = cloneTimeSeriesRow(ts[t]);
+    }
+  }
+  return newTs;
+};
+
+function removeSparseTimeSeriesRows(ts, sparsityFilter) {
+  toConsole("Built time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
+  var minNumDims = Math.round(getTimeSeriesDimensionality(ts) * sparsityFilter);
+  ts = selectTimeSeriesRows(ts, function(t, tsRow) {
+    return getTimeSeriesRowFeatureNames(tsRow).length >= minNumDims;
+  });
+  toConsole("Filtered down to time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
+  return ts;
+}
+
 $(document).ready(function() {
   var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
+  var targetSym = syms[0];
+
   var diffWin = 3;
   var varWin = 5;
+  var forecastWin = 5;  // five trading days
+  var sparsityFilter = 0.50;
+
   var deltaFn = function(x1, x2) {
     return (x2 - x1) / x1;
   };
@@ -257,10 +325,13 @@ $(document).ready(function() {
   var stdevFn = function(xs) {
     return Dist.getStandardDeviation(xs);
   };
+
   var ts = getSymbolTimeSeries(syms, diffWin, deltaFn, varWin, stdevFn);
-  toConsole("ts", ts);
-  // TODO add the target / dependent variable
-  // TODO add a filter to remove extra sparse examples
+  toConsole("Built symbol time series", ts);
+  var targetFeatureName = targetSym + ":close";
+  var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, deltaFn);
+  toConsole("Extracted target time series", targetFeatureName, targetTs);
+  ts = removeSparseTimeSeriesRows(ts, sparsityFilter);
   // TODO add a feature normalization process
 });
     </script>
