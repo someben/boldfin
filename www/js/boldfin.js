@@ -127,7 +127,7 @@ function addVarFeatures(ts, featureName, varWin, varFn) {
   return newTs;
 };
 
-function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn, tStart) {
+function getSymbolTechnicalTimeSeries(syms, diffWin, diffFn, varWin, varFn, tStart) {
   var ts = null;
   for (var i=0; i < syms.length; i++) {
     var sym = syms[i];
@@ -140,7 +140,7 @@ function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn, tStart) {
     for (var j=0; j < featureNames.length; j++) {
       var featureName = featureNames[j];
       if (diffWin > 0) {
-        toConsole("Adding difference features", sym, featureName);
+        toConsole("Adding technical difference features", sym, featureName);
         for (var diffWin1 = 1; diffWin1 <= diffWin; diffWin1++) {
           symTs = addDiffFeatures(symTs, featureName, diffWin1, diffFn);
         }
@@ -158,6 +158,31 @@ function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn, tStart) {
     }
     else {
       ts = symTs;
+    }
+  }
+  return ts;
+}
+
+function getSymbolFundamentalTimeSeries(syms, diffWin, diffFn, varWin, varFn, tStart) {
+  var ts = selectFundamentalTimeSeriesSymbols(syms);
+  if (typeof tStart != "undefined") {
+    ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= tStart; });
+  }
+
+  var featureNames = getTimeSeriesFeatureNames(ts);
+  for (var i=0; i < featureNames.length; i++) {
+    var featureName = featureNames[i];
+    if (diffWin > 0) {
+      toConsole("Adding fundamental difference features", featureName);
+      for (var diffWin1 = 1; diffWin1 <= diffWin; diffWin1++) {
+        ts = addDiffFeatures(ts, featureName, diffWin1, diffFn);
+      }
+    }
+    if (varWin > 0) {
+      toConsole("Adding fundamental variance features", featureName);
+      for (var varWin1 = 1; varWin1 <= varWin; varWin1++) {
+        ts = addVarFeatures(ts, featureName, varWin1, varFn);
+      }
     }
   }
   return ts;
@@ -240,13 +265,20 @@ function standardizeTimeSeries(ts, prevFeatureDist) {
   var featureDist = {};
   for (var i=0; i < featureNames.length; i++) {
     var featureName = featureNames[i];
-    featureDist[featureName] = {};
     if (typeof prevFeatureDist == "undefined") {
       var featureVals = [];
       mapTimeSeriesFeatureVals(ts, featureName, function(t, featureVal) { featureVals.push(featureVal); });
-      featureDist[featureName].mean = Dist.getMean(featureVals);
-      featureDist[featureName].stdev = Dist.getStandardDeviation(featureVals);
-      toConsole("For feature", featureName, "found", featureDist[featureName].mean, "mean", featureDist[featureName].stdev, "standard deviation");
+      var featureValMean = Dist.getMean(featureVals); var featureValStdev = Dist.getStandardDeviation(featureVals);
+      if (featureValMean && featureValStdev) {
+        featureDist[featureName] = {
+          mean: featureValMean,
+          stdev: featureValStdev
+        };
+        toConsole("For feature", featureName, "found", featureDist[featureName].mean, "mean", featureDist[featureName].stdev, "standard deviation");
+      }
+      else {
+        toConsole("For feature", featureName, "could not calculate mean & standard deviation");
+      }
     }
     else if (prevFeatureDist[featureName]) {
       featureDist[featureName] = prevFeatureDist[featureName];
@@ -437,7 +469,7 @@ function selectFundamentalTimeSeriesSymbols(syms) {
 
 function trainStrategy(ts, targetTs, tStart) {
   var minNumExamples = 20;
-  var sparsityFilter = 0.50;
+  var sparsityFilter = 0.35;
   var numTopFeatures = 3;
   var kNearest = 3;
   var maxNumTestSteps = 5;
@@ -508,7 +540,7 @@ function trainTechnicalStrategy(syms, targetSym, diffWin, varWin, forecastWin) {
     combSyms.push(targetSym);
   }
 
-  var ts = getSymbolTimeSeries(combSyms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev, tStart);
+  var ts = getSymbolTechnicalTimeSeries(combSyms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev, tStart);
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, DiffFunction.delta);
   toConsole("Built symbol base & target time series", ts, targetTs);
@@ -522,8 +554,8 @@ function trainFundamentalStrategy(syms, targetSym, diffWin, varWin, forecastWin)
     combSyms.push(targetSym);
   }
 
-  var fundTs = selectFundamentalTimeSeriesSymbols(combSyms);
-  var targetBackTs = getSymbolTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev, tStart);
+  var fundTs = getSymbolFundamentalTimeSeries(combSyms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
+  var targetBackTs = getSymbolTechnicalTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev, tStart);
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(targetBackTs, targetFeatureName, forecastWin, DiffFunction.delta);
   toConsole("Built symbol fundamental & target time series", fundTs, targetTs);
@@ -537,8 +569,8 @@ $(document).ready(function() {
   var diffWin = 2; var varWin = 0;
   var forecastWin = 5;  // five trading days
 
-  trainTechnicalStrategy(syms, targetSym);
-  //trainFundamentalStrategy(syms, targetSym);
+  //trainTechnicalStrategy(syms, targetSym, diffWin, varWin, forecastWin);
+  trainFundamentalStrategy(syms, targetSym, diffWin, varWin, forecastWin);
 });
 
 
