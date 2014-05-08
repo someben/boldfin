@@ -1,9 +1,3 @@
-<html>
-  <head>
-    <script src="http://code.jquery.com/jquery-1.11.1.min.js" type="text/javascript"></script>
-    <script src=".quandl-creds.js" type="text/javascript"></script>
-    <script language="JavaScript">
-
 // technique from "http://stackoverflow.com/questions/11887934/check-if-daylight-saving-time-is-in-effect-and-if-it-is-for-how-many-hours"
 Date.prototype.getStdTimezoneOffset = function() {
   var jan = new Date(this.getFullYear(), 0, 1);
@@ -75,6 +69,13 @@ function toConsole() {
   if (window.console) {
     window.console.log.apply(window.console, arguments);
   }
+}
+
+function getSortedKeys(o) {
+  var keys = [];
+  for (var key in o) { keys.push(key); }
+  keys.sort(function(a, b) { return ((o[a] < o[b]) ? -1 : ((o[a] > o[b]) ? +1 : 0)); });
+  return keys;
 }
 
 function _getQuandlStockPriceTimeSeries(exch, ticker) {
@@ -442,23 +443,21 @@ function rankTimeSeriesFeatures(contTs, contTargetTs) {
     featureInfs[featureName] = featureInf;
   }
 
-  featureNames.sort(function(a, b) {
-    return ((featureInfs[a] < featureInfs[b]) ? -1 : ((featureInfs[a] > featureInfs[b]) ? +1 : 0));
-  });
-  featureNames.reverse();
-  toConsole("Sorted feature by mutual information", featureNames);
-  return featureNames;
+  var sortedFeatureNames = getSortedKeys(featureInfs);
+  sortedFeatureNames.reverse();
+  toConsole("Features sorted by mutual information", sortedFeatureNames);
+  return sortedFeatureNames;
 }
 
 $(document).ready(function() {
   //var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
-var syms = ["NFLX:NASDAQ"];
+var syms = ["NFLX:NASDAQ"]; // TODO testing
   var targetSym = syms[0];
 
   //var diffWin = 3;
   //var varWin = 5;
-var diffWin = 1;
-var varWin = 0;
+var diffWin = 1; // TODO testing
+var varWin = 0; // TODO testing
   var forecastWin = 5;  // five trading days
   var sparsityFilter = 0.50;
   var numTopFeatures = 3;
@@ -474,7 +473,7 @@ var varWin = 0;
   };
 
   var ts = getSymbolTimeSeries(syms, diffWin, deltaFn, varWin, stdevFn);
-ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= 1388563200 });
+ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= 1388563200 }); // TODO testing
   toConsole("Built symbol time series", ts);
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, deltaFn);
@@ -491,12 +490,4 @@ ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= 1388563200 });
   stdTs = selectTimeSeriesFeatures(stdTs, function(t, featureName) { return topFeatureNames.indexOf(featureName) != -1 });
   toConsole("Selected time series", stdTs);
 });
-    </script>
-    <script src="../data/tmp_NASDAQ_NFLX.js" type="text/javascript"></script>
-  </head>
-
-  <body>
-    <pre id="boldfin-scratch"><pre>
-  </body>
-</html>
 
