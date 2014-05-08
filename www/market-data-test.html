@@ -15,6 +15,10 @@ Date.prototype.isDst = function() {
   return this.getTimezoneOffset() < this.getStdTimezoneOffset();
 }
 
+Math.log2 = function(x) {
+  return Math.log(x) / Math.LN2;
+}
+
 var Dist = {
   eachNum: function(xs, fn) {
     var result = null;
@@ -246,13 +250,17 @@ function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn) {
     var featureNames = getTimeSeriesFeatureNames(symTs);
     for (var j=0; j < featureNames.length; j++) {
       var featureName = featureNames[j];
-      toConsole("Adding difference features", sym, featureName);
-      for (var diffWin1 = 1; diffWin1 <= diffWin; diffWin1++) {
-        symTs = addDiffFeatures(symTs, featureName, diffWin1, diffFn);
+      if (diffWin > 0) {
+        toConsole("Adding difference features", sym, featureName);
+        for (var diffWin1 = 1; diffWin1 <= diffWin; diffWin1++) {
+          symTs = addDiffFeatures(symTs, featureName, diffWin1, diffFn);
+        }
       }
-      toConsole("Adding variance features", sym, featureName);
-      for (var varWin1 = 1; varWin1 <= varWin; varWin1++) {
-        symTs = addVarFeatures(symTs, featureName, varWin1, varFn);
+      if (varWin > 0) {
+        toConsole("Adding variance features", sym, featureName);
+        for (var varWin1 = 1; varWin1 <= varWin; varWin1++) {
+          symTs = addVarFeatures(symTs, featureName, varWin1, varFn);
+        }
       }
     }
     symTs = cloneTimeSeries(symTs, sym + ":");
@@ -295,7 +303,24 @@ function selectTimeSeriesRows(ts, fn) {
     }
   }
   return newTs;
-};
+}
+
+function selectTimeSeriesFeatures(ts, fn) {
+  var newTs = {};
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  for (var i=0; i < tsRowTimes.length; i++) {
+    var t = tsRowTimes[i];
+    var newTsRow = {}
+    for (var featureName in ts[t]) {
+      if (! fn(t, featureName)) {
+        continue;
+      }
+      newTsRow[featureName] = ts[t][featureName];
+    }
+    newTs[t] = newTsRow;
+  }
+  return newTs;
+}
 
 function removeSparseTimeSeriesRows(ts, sparsityFilter) {
   var minNumDims = Math.round(getTimeSeriesDimensionality(ts) * sparsityFilter);
@@ -313,6 +338,9 @@ function mapTimeSeriesFeatureVals(ts, featureName, fn) {
     var t = tsRowTimes[i];
     newTs[t] = cloneTimeSeriesRow(ts[t]);
     var newFeatureVal = fn(t, ts[t][featureName]);
+    if (! newFeatureVal) {
+      continue;
+    }
     newTs[t][featureName] = newFeatureVal;
   }
   return newTs;
@@ -341,14 +369,99 @@ function standardizeTimeSeries(ts) {
   };
 }
 
+function discretizeStandardizedFeatureVal(featureVal, numBuckets) {
+  var stdevRange = 3.0;
+  return Math.max(0, Math.min(numBuckets - 1,
+    Math.floor(numBuckets * ((stdevRange + (featureVal / stdevRange)) / (stdevRange * 2)))));
+}
+
+function discretizeStandardizedTimeSeries(ts) {
+  var numBuckets = 100;
+  var featureNames = getTimeSeriesFeatureNames(ts);
+  var discTs = cloneTimeSeries(ts);
+  for (var i=0; i < featureNames.length; i++) {
+    var featureName = featureNames[i];
+    toConsole("Discretizing time series", featureName);
+    discTs = mapTimeSeriesFeatureVals(discTs, featureName, function(t, featureVal) {
+      if (featureVal) {
+        return discretizeStandardizedFeatureVal(featureVal, numBuckets);
+      }
+      else {
+        return featureVal;  // example does not have this feature (i.e. sparse)
+      }
+    });
+  }
+  return discTs;
+}
+
+function rankTimeSeriesFeatures(contTs, contTargetTs) {
+  var tsLen = getTimeSeriesLength(contTs);
+  var ts = discretizeStandardizedTimeSeries(contTs);
+  var targetTs = discretizeStandardizedTimeSeries(contTargetTs);
+
+  var featureNames = getTimeSeriesFeatureNames(ts);
+  var featureCounts = {};
+  for (var i=0; i < featureNames.length; i++) {
+    var featureName = featureNames[i];
+    featureCounts[featureName] = {};
+    mapTimeSeriesFeatureVals(ts, featureName, function(t, featureVal) {
+      if (! featureCounts[featureName][featureVal]) {
+        featureCounts[featureName][featureVal] = 0;
+      }
+      featureCounts[featureName][featureVal] += 1;
+    });
+  }
+
+  var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
+  var targetFeatureCounts = {};
+  mapTimeSeriesFeatureVals(targetTs, targetFeatureName, function(t, featureVal) {
+    if (! targetFeatureCounts[featureVal]) {
+      targetFeatureCounts[featureVal] = 0;
+    }
+    targetFeatureCounts[featureVal] += 1;
+  });
+
+  var featureInfs = {};
+  for (var i=0; i < featureNames.length; i++) {
+    var featureName = featureNames[i];
+    var featureInf = 0;
+    for (var featureVal in featureCounts[featureName]) {
+      var featureValProb = featureCounts[featureName][featureVal] / tsLen;
+      for (var targetFeatureVal in targetFeatureCounts) {
+        var targetFeatureValProb = targetFeatureCounts[targetFeatureVal] / tsLen;
+        var matchTs = selectTimeSeriesRows(ts, function(t, tsRow) {
+          return (tsRow[featureName] == featureVal) && targetTs[t] && (targetTs[t][targetFeatureName] == targetFeatureVal);
+        });
+        var jointProb = getTimeSeriesLength(matchTs) / tsLen;
+        if (jointProb > 0) {
+          featureInf += jointProb * Math.log2(jointProb / (featureValProb * targetFeatureValProb));
+        }
+      }
+    }
+    toConsole("Mutual information for", featureName, featureInf);
+    featureInfs[featureName] = featureInf;
+  }
+
+  featureNames.sort(function(a, b) {
+    return ((featureInfs[a] < featureInfs[b]) ? -1 : ((featureInfs[a] > featureInfs[b]) ? +1 : 0));
+  });
+  featureNames.reverse();
+  toConsole("Sorted feature by mutual information", featureNames);
+  return featureNames;
+}
+
 $(document).ready(function() {
-  var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
+  //var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
+var syms = ["NFLX:NASDAQ"];
   var targetSym = syms[0];
 
-  var diffWin = 3;
-  var varWin = 5;
+  //var diffWin = 3;
+  //var varWin = 5;
+var diffWin = 1;
+var varWin = 0;
   var forecastWin = 5;  // five trading days
   var sparsityFilter = 0.50;
+  var numTopFeatures = 3;
 
   var deltaFn = function(x1, x2) {
     return (x2 - x1) / x1;
@@ -361,21 +474,29 @@ $(document).ready(function() {
   };
 
   var ts = getSymbolTimeSeries(syms, diffWin, deltaFn, varWin, stdevFn);
+ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= 1388563200 });
   toConsole("Built symbol time series", ts);
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, deltaFn);
   toConsole("Extracted target time series", targetFeatureName, targetTs);
-  toConsole("Built time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
-  ts = removeSparseTimeSeriesRows(ts, sparsityFilter);
-  result = standardizeTimeSeries(ts);
-  stdTs = result.ts; featureDist = result.featureDist;
-  toConsole("Standardized time series", stdTs);
+  
+  var result = standardizeTimeSeries(ts);
+  var stdTs = result.ts; var featureDist = result.featureDist;
+  var result = standardizeTimeSeries(targetTs);
+  var stdTargetTs = result.ts; var targetFeatureDist = result.featureDist;
+  toConsole("Standardized time series", stdTs, stdTargetTs);
+
+  stdTs = removeSparseTimeSeriesRows(stdTs, sparsityFilter);
+  var topFeatureNames = rankTimeSeriesFeatures(stdTs, stdTargetTs).slice(0, numTopFeatures);
+  stdTs = selectTimeSeriesFeatures(stdTs, function(t, featureName) { return topFeatureNames.indexOf(featureName) != -1 });
+  toConsole("Selected time series", stdTs);
 });
     </script>
     <script src="../data/tmp_NASDAQ_NFLX.js" type="text/javascript"></script>
   </head>
 
   <body>
+    <pre id="boldfin-scratch"><pre>
   </body>
 </html>
 
