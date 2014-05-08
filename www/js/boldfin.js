@@ -408,7 +408,7 @@ function getTimeSeriesPrediction(ts, targetTs, testTs, testTargetTs, kNearest) {
   toConsole("On", toPrettyTimestamp(testTargetTsRowTime), "found", getTimeSeriesLength(nearestTs), "length nearest time series.");
   var nearestTsRowTimes = getTimeSeriesTimes(nearestTs);
   var nearestTargetTs = selectTimeSeriesRows(targetTs, function(t, tsRow) { return nearestTsRowTimes.indexOf(t) != -1 });
-  toConsole("Found", getTimeSeriesLength(nearestTargetTs), "of", kNearest, "nearest targets");
+  toConsole("Found", getTimeSeriesLength(nearestTargetTs), "of", kNearest, "maximum nearest targets");
 
   var preds = [];
   mapTimeSeriesFeatureVals(nearestTargetTs, targetFeatureName, function(t, featureVal) { preds.push(featureVal); });
@@ -416,13 +416,23 @@ function getTimeSeriesPrediction(ts, targetTs, testTs, testTargetTs, kNearest) {
   if (preds.length > 0) {
     meanPred = Dist.getMean(preds);
   }
-  var actualTarget = testTargetTs[testTargetTsRowTime][targetFeatureName];
-  toConsole("Made", meanPred, "prediction", actualTarget, "vs. actual");
+  var actualTarget = null;
+  if (testTargetTs[testTargetTsRowTime]) {
+    actualTarget = testTargetTs[testTargetTsRowTime][targetFeatureName];
+  }
+  toConsole("Made", meanPred, "prediction", actualTarget, "versus actual");
 
   return {
     predTarget: meanPred,
     actualTarget: actualTarget
   };
+}
+
+function selectFundamentalTimeSeriesSymbols(syms) {
+  return selectTimeSeriesFeatures(getFundamentalTimeSeries(), function(t, featureName) {
+    var featureSym = featureName.split(":").slice(0, 2).join(":");
+    return syms.indexOf(featureSym) != -1;
+  });
 }
 
 function trainStrategy(ts, targetTs, minTime) {
@@ -434,7 +444,7 @@ function trainStrategy(ts, targetTs, minTime) {
 
   if (typeof minTime != "undefined") {
     ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= minTime; });
-    toConsole("Filtered to market data since time", minTime);
+    toConsole("Filtered to market data since", minTime, "time, now", getTimeSeriesLength(ts), "length");
   }
 
   var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
@@ -488,15 +498,10 @@ function trainStrategy(ts, targetTs, minTime) {
       break;
     }
   }
+  toConsole("Finished training");
 };
 
-function trainTechnicalStrategy(syms, targetSym) {
-  //var diffWin = 3;
-  //var varWin = 5;
-var diffWin = 2; // TODO testing
-var varWin = 0; // TODO testing
-  var forecastWin = 5;  // five trading days
-
+function trainTechnicalStrategy(syms, targetSym, diffWin, varWin, forecastWin) {
   var combSyms = syms;
   if (combSyms.indexOf(targetSym) == -1) {
     combSyms.push(targetSym);
@@ -509,28 +514,29 @@ var varWin = 0; // TODO testing
   trainStrategy(ts, targetTs, getDatestampEpochTime("2014-01-01"));
 }
 
-function trainFundamentalStrategy(syms, targetSym) {
-  //var diffWin = 3;
-  //var varWin = 5;
-var diffWin = 2; // TODO testing
-var varWin = 0; // TODO testing
-  var forecastWin = 5;  // five trading days
+function trainFundamentalStrategy(syms, targetSym, diffWin, varWin, forecastWin) {
+  var combSyms = syms;
+  if (combSyms.indexOf(targetSym) == -1) {
+    combSyms.push(targetSym);
+  }
 
-  var targetTs = getSymbolTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
-  var fundTs = selectTimeSeriesFeatures(getFundamentalTimeSeries(), function(t, featureName) {
-    var featureSym = featureName.split(":").slice(0, 2).join(":");
-    return syms.indexOf(featureSym) != -1;
-  });
-  var ts = mergeTimeSeries(fundTs, targetTs);
+  var fundTs = selectFundamentalTimeSeriesSymbols(combSyms);
+  var targetBackTs = getSymbolTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
   var targetFeatureName = targetSym + ":close";
-  trainStrategy(ts, targetFeatureName, forecastWin, DiffFunction.delta, getDatestampEpochTime("2014-01-01"));
+  var targetTs = extractForecastTimeSeries(targetBackTs, targetFeatureName, forecastWin, DiffFunction.delta);
+  toConsole("Built symbol fundamental & target time series", fundTs, targetTs);
+  trainStrategy(fundTs, targetTs, getDatestampEpochTime("2013-01-01"));
 }
 
 $(document).ready(function() {
   var syms = ["NFLX:NASDAQ", "WDC:NASDAQ"];
   var targetSym = "NFLX:NASDAQ";
+  //var diffWin = 3; var varWin = 5;
+  var diffWin = 2; var varWin = 0;
+  var forecastWin = 5;  // five trading days
+
   trainTechnicalStrategy(syms, targetSym);
-  //trainFundamentalStrategy(syms, targetSym);
+  trainFundamentalStrategy(syms, targetSym);
 });
 
 
