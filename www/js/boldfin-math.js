@@ -43,7 +43,7 @@ var Dist = {
     return sum / this.getLength(xs);
   },
 
-  getSquaredDifferenceSum: function(xs) {
+  _getSquaredDifferenceSum: function(xs) {
     var mean = this.getMean(xs);
     var sum = 0;
     this.eachNum(xs, function(x) {
@@ -54,11 +54,11 @@ var Dist = {
   },
 
   getVariance: function(xs) {
-    return this.getSquaredDifferenceSum(xs) / (this.getLength(xs) - 1);
+    return this._getSquaredDifferenceSum(xs) / (this.getLength(xs) - 1);
   },
 
   getPopulationVariance: function(xs) {
-    return this.getSquaredDifferenceSum(xs) / this.getLength(xs);
+    return this._getSquaredDifferenceSum(xs) / this.getLength(xs);
   },
 
   getStandardDeviation: function(xs) {
@@ -67,6 +67,39 @@ var Dist = {
 
   getPopulationStandardDeviation: function(xs) {
     return Math.sqrt(this.getPopulationVariance(xs));
+  },
+
+  _getCovarianceSum: function(xs, ys) {
+    var xNums = [];
+    this.eachNum(xs, function(x) { xNums.push(x); });
+    var yNums = [];
+    this.eachNum(ys, function(y) { yNums.push(y); });
+    if (xNums.length != yNums.length) {
+      return null;
+    }
+
+    var xMean = this.getMean(xs); var yMean = this.getMean(ys);
+    var sum = 0;
+    for (var i=0; i < xNums.length; i++) {
+      sum += (xNums[i] - xMean) * (yNums[i] - yMean);
+    }
+    return sum;
+  },
+
+  getCovariance: function(xs, ys) {
+    return this._getCovarianceSum(xs, ys) / (this.getLength(xs) - 1);
+  },
+
+  getPopulationCovariance: function(xs, ys) {
+    return this._getCovarianceSum(xs, ys) / this.getLength(xs);
+  },
+
+  getCorrelation: function(xs, ys) {
+    return this.getCovariance(xs, ys) / (this.getStandardDeviation(xs) * this.getStandardDeviation(ys));
+  },
+
+  getPopulationCorrelation: function(xs, ys) {
+    return this.getPopulationCovariance(xs, ys) / (this.getPopulationStandardDeviation(xs) * this.getPopulationStandardDeviation(ys));
   }
 };
 

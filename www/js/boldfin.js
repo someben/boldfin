@@ -228,30 +228,47 @@ function mapTimeSeriesFeatureVals(ts, featureName, fn) {
 
 function removeSparseTimeSeriesRows(ts, sparsityFilter) {
   var minNumDims = Math.round(getTimeSeriesDimensionality(ts) * sparsityFilter);
-  ts = selectTimeSeriesRows(ts, function(t, tsRow) {
+  var newTs = selectTimeSeriesRows(ts, function(t, tsRow) {
     return getTimeSeriesRowFeatureNames(tsRow).length >= minNumDims;
   });
-  toConsole("Filtered down to time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
-  return ts;
+  toConsole("Removed spare time series rows, from", getTimeSeriesLength(ts), "to", getTimeSeriesLength(newTs));
+  return newTs;
 }
 
-function standardizeTimeSeries(ts) {
-  var newTs = cloneTimeSeries(ts);
+function standardizeTimeSeries(ts, prevFeatureDist) {
   var featureNames = getTimeSeriesFeatureNames(ts);
   var featureDist = {};
   for (var i=0; i < featureNames.length; i++) {
     var featureName = featureNames[i];
     featureDist[featureName] = {};
+    if (typeof prevFeatureDist == "undefined") {
+      var featureVals = [];
+      mapTimeSeriesFeatureVals(ts, featureName, function(t, featureVal) { featureVals.push(featureVal); });
+      featureDist[featureName].mean = Dist.getMean(featureVals);
+      featureDist[featureName].stdev = Dist.getStandardDeviation(featureVals);
+      toConsole("For feature", featureName, "found", featureDist[featureName].mean, "mean", featureDist[featureName].stdev, "standard deviation");
+    }
+    else if (prevFeatureDist[featureName]) {
+      featureDist[featureName] = prevFeatureDist[featureName];
+      toConsole("For feature", featureName, "using previous", featureDist[featureName].mean, "mean", featureDist[featureName].stdev, "standard deviation");
+    }
+  }
 
-    var featureVals = [];
-    mapTimeSeriesFeatureVals(ts, featureName, function(t, featureVal) { featureVals.push(featureVal); });
-    featureDist[featureName].mean = Dist.getMean(featureVals);
-    featureDist[featureName].stdev = Dist.getStandardDeviation(featureVals);
-    toConsole("For feature", featureName, "found", featureDist[featureName].mean, "mean", featureDist[featureName].stdev, "standard deviation");
+  var newFeatureNames = [];
+  for (var featureName in featureDist) {
+    newFeatureNames.push(featureName);
+  }
+  var newTs = selectTimeSeriesFeatures(ts, function(t, featureName) {
+    return newFeatureNames.indexOf(featureName) != -1;
+  });
+  for (var i=0; i < newFeatureNames.length; i++) {
+    var featureName = newFeatureNames[i];
     newTs = mapTimeSeriesFeatureVals(newTs, featureName, function(t, featureVal) {
       return (featureVal - featureDist[featureName].mean) / featureDist[featureName].stdev;
     });
   }
+
+  toConsole("After standardizing", getTimeSeriesDimensionality(ts), "to", getTimeSeriesDimensionality(newTs), "dimensions")
   return {
     ts: newTs,
     featureDist: featureDist
@@ -383,16 +400,43 @@ function getNearestTimeSeries(ts, targetTsRow, n) {
   return nearestTs;
 }
 
+function getTimeSeriesPrediction(ts, targetTs, testTs, testTargetTs, kNearest) {
+  var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
+  var testTargetTsRowTime = getTimeSeriesTimes(testTs)[0];
+
+  var nearestTs = getNearestTimeSeries(ts, testTs[testTargetTsRowTime], kNearest);
+  toConsole("On", toPrettyTimestamp(testTargetTsRowTime), "found", getTimeSeriesLength(nearestTs), "length nearest time series.");
+  var nearestTsRowTimes = getTimeSeriesTimes(nearestTs);
+  var nearestTargetTs = selectTimeSeriesRows(targetTs, function(t, tsRow) { return nearestTsRowTimes.indexOf(t) != -1 });
+  toConsole("Found", getTimeSeriesLength(nearestTargetTs), "of", kNearest, "nearest targets");
+
+  var preds = [];
+  mapTimeSeriesFeatureVals(nearestTargetTs, targetFeatureName, function(t, featureVal) { preds.push(featureVal); });
+  var meanPred = null;
+  if (preds.length > 0) {
+    meanPred = Dist.getMean(preds);
+  }
+  var actualTarget = testTargetTs[testTargetTsRowTime][targetFeatureName];
+  toConsole("Made", meanPred, "prediction", actualTarget, "vs. actual");
+
+  return {
+    predTarget: meanPred,
+    actualTarget: actualTarget
+  };
+}
+
 $(document).ready(function() {
   //var syms = ["NFLX:NASDAQ", "GOOG:NASDAQ"];
 var syms = ["NFLX:NASDAQ"]; // TODO testing
   var targetSym = syms[0];
+  var targetFeatureName = targetSym + ":close";
 
   //var diffWin = 3;
   //var varWin = 5;
 var diffWin = 1; // TODO testing
 var varWin = 0; // TODO testing
   var forecastWin = 5;  // five trading days
+  var minNumExamples = 20;
   var sparsityFilter = 0.50;
   var numTopFeatures = 3;
   var kNearest = 3;
@@ -408,35 +452,49 @@ var varWin = 0; // TODO testing
   };
 
   var ts = getSymbolTimeSeries(syms, diffWin, deltaFn, varWin, stdevFn);
-ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= 1388563200 }); // TODO testing
-  toConsole("Built symbol time series", ts);
-  var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, deltaFn);
-  toConsole("Extracted target time series", targetFeatureName, targetTs);
-  
-  var result = standardizeTimeSeries(ts);
-  var stdTs = result.ts; var featureDist = result.featureDist;
-  var result = standardizeTimeSeries(targetTs);
-  var stdTargetTs = result.ts; var targetFeatureDist = result.featureDist;
-  toConsole("Standardized time series", stdTs, stdTargetTs);
+  toConsole("Built symbol base & target time series", ts, targetTs);
 
-  stdTs = removeSparseTimeSeriesRows(stdTs, sparsityFilter);
-  stdTs = selectTimeSeriesFeatureMutualInfo(stdTs, stdTargetTs, numTopFeatures);
-  toConsole("Selected time series", stdTs);
-
-  var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
-  var tsRowTimes = getTimeSeriesTimes(stdTs);
+  var predTargets = []; var actualTargets = [];
+  var tsRowTimes = getTimeSeriesTimes(ts);
   for (var i=0; i < tsRowTimes.length; i++) {
-    var tsRowTime = tsRowTimes[i];
+    var nowTime = tsRowTimes[i];
 
-    var nearestTs = getNearestTimeSeries(stdTs, stdTs[tsRowTime], kNearest);
-    var nearestTsRowTimes = getTimeSeriesTimes(nearestTs);
-    var nearestTargetTs = selectTimeSeriesRows(targetTs, function(t, tsRow) { return nearestTsRowTimes.indexOf(t) != -1 });
+    var trainTs = selectTimeSeriesRows(ts, function(t, tsRow) { return t <= nowTime; });
+    var trainTargetTs = extractForecastTimeSeries(trainTs, targetFeatureName, forecastWin, deltaFn);
+    if (getTimeSeriesLength(trainTs) < minNumExamples) {
+      continue;
+    }
+    toConsole("Selected training time series", trainTs, trainTargetTs);
+ 
+    var result = null; 
+    result = standardizeTimeSeries(trainTs);
+    var stdTrainTs = result.ts; var trainFeatureDist = result.featureDist;
+    result = standardizeTimeSeries(trainTargetTs);
+    var stdTrainTargetTs = result.ts; var trainTargetFeatureDist = result.featureDist;
+    toConsole("Standardized time series", stdTrainTs, stdTrainTargetTs);
 
-    var preds = [];
-    mapTimeSeriesFeatureVals(nearestTargetTs, targetFeatureName, function(t, featureVal) { preds.push(featureVal); });
-    var meanPred = Dist.getMean(preds);
-    toConsole("At time", toPrettyTimestamp(tsRowTime), "found", getTimeSeriesLength(nearestTargetTs), "of", kNearest, "near targets", nearestTargetTs, "prediction", meanPred);
+    stdTrainTs = removeSparseTimeSeriesRows(stdTrainTs, sparsityFilter);
+    stdTrainTs = selectTimeSeriesFeatureMutualInfo(stdTrainTs, stdTrainTargetTs, numTopFeatures);
+    toConsole("Selected time series", stdTrainTs);
+
+    var testTs = selectTimeSeriesRows(ts, function(t, tsRow) { return t > nowTime; });
+    var testTargetTs = extractForecastTimeSeries(testTs, targetFeatureName, forecastWin, deltaFn);
+    toConsole("Selected testing time series", testTs, testTargetTs);
+
+    result = standardizeTimeSeries(testTs, trainFeatureDist);
+    var stdTestTs = result.ts; var testFeatureDist = result.featureDist;
+    result = standardizeTimeSeries(testTargetTs, trainFeatureDist);
+    var stdTestTargetTs = result.ts; var testTargetFeatureDist = result.featureDist;
+    result = getTimeSeriesPrediction(stdTrainTs, trainTargetTs, stdTestTs, testTargetTs, kNearest);
+    if (result.predTarget && result.actualTarget) {
+      predTargets.push(result.predTarget);
+      actualTargets.push(result.actualTarget);
+    }
+
+    var corr = Dist.getCorrelation(predTargets, actualTargets);
+    toConsole("Found", corr, "correlation over", predTargets.length, "out-of-sample backtest steps");
+    if (predTargets.length >= 50) { break; }
   }
 });
 
