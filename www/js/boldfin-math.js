@@ -33,7 +33,7 @@ var Dist = {
 
   getLength: function(xs) {
     var num = 0;
-    this.eachNum(xs, function(x) { num += 1 });
+    this.eachNum(xs, function(x) { num++ });
     return num;
   },
 

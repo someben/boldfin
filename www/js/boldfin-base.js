@@ -14,6 +14,12 @@ You may obtain a copy of the License at
     limitations under the License.
 */
 
+function toConsole() {
+  if (window.console) {
+    window.console.log.apply(window.console, arguments);
+  }
+}
+
 // technique from "http://stackoverflow.com/questions/11887934/check-if-daylight-saving-time-is-in-effect-and-if-it-is-for-how-many-hours"
 Date.prototype.getStdTimezoneOffset = function() {
   var jan = new Date(this.getFullYear(), 0, 1);
@@ -25,10 +31,9 @@ Date.prototype.isDst = function() {
   return this.getTimezoneOffset() < this.getStdTimezoneOffset();
 }
 
-function toConsole() {
-  if (window.console) {
-    window.console.log.apply(window.console, arguments);
-  }
+function getDatestampEpochTime(s) {
+  var tz = ((new Date(s).isDst()) ? "-04:00" : "-05:00");
+  return new Date(s + "T16:30:00" + tz) / 1000;
 }
 
 function toPrettyTimestamp(t) {
