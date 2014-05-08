@@ -425,7 +425,7 @@ function getTimeSeriesPrediction(ts, targetTs, testTs, testTargetTs, kNearest) {
   };
 }
 
-function trainStrategy(ts, targetFeatureName, forecastWin, forecastDiffFn, minTime) {
+function trainStrategy(ts, targetTs, minTime) {
   var minNumExamples = 20;
   var sparsityFilter = 0.50;
   var numTopFeatures = 3;
@@ -437,6 +437,7 @@ function trainStrategy(ts, targetFeatureName, forecastWin, forecastDiffFn, minTi
     toConsole("Filtered to market data since time", minTime);
   }
 
+  var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
   var predTargets = []; var actualTargets = [];
   var tsRowTimes = getTimeSeriesTimes(ts);
   var numTestSteps = 0;
@@ -444,12 +445,13 @@ function trainStrategy(ts, targetFeatureName, forecastWin, forecastDiffFn, minTi
     var nowTime = tsRowTimes[i];
 
     var trainTs = selectTimeSeriesRows(ts, function(t, tsRow) { return t <= nowTime; });
-    var trainTargetTs = extractForecastTimeSeries(trainTs, targetFeatureName, forecastWin, forecastDiffFn);
     if (getTimeSeriesLength(trainTs) < minNumExamples) {
       continue;
     }
-    toConsole("Selected training time series", trainTs, trainTargetTs);
     numTestSteps++;
+    var trainTsRowTimes = getTimeSeriesTimes(trainTs);
+    var trainTargetTs = selectTimeSeriesRows(targetTs, function(t, tsRow) { return trainTsRowTimes.indexOf(t) != -1; });
+    toConsole("Selected training time series", trainTs, trainTargetTs);
  
     var result = null; 
     result = standardizeTimeSeries(trainTs);
@@ -460,10 +462,10 @@ function trainStrategy(ts, targetFeatureName, forecastWin, forecastDiffFn, minTi
 
     stdTrainTs = removeSparseTimeSeriesRows(stdTrainTs, sparsityFilter);
     stdTrainTs = selectTimeSeriesFeatureMutualInfo(stdTrainTs, stdTrainTargetTs, numTopFeatures);
-    toConsole("Selected time series", stdTrainTs);
 
     var testTs = selectTimeSeriesRows(ts, function(t, tsRow) { return t > nowTime; });
-    var testTargetTs = extractForecastTimeSeries(testTs, targetFeatureName, forecastWin, forecastDiffFn);
+    var testTsRowTimes = getTimeSeriesTimes(testTs);
+    var testTargetTs = selectTimeSeriesRows(targetTs, function(t, tsRow) { return testTsRowTimes.indexOf(t) != -1; });
     toConsole("Selected testing time series", testTs, testTargetTs);
 
     result = standardizeTimeSeries(testTs, trainFeatureDist);
@@ -495,15 +497,40 @@ var diffWin = 2; // TODO testing
 var varWin = 0; // TODO testing
   var forecastWin = 5;  // five trading days
 
-  var ts = getSymbolTimeSeries(syms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
+  var combSyms = syms;
+  if (combSyms.indexOf(targetSym) == -1) {
+    combSyms.push(targetSym);
+  }
+
+  var ts = getSymbolTimeSeries(combSyms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
   var targetFeatureName = targetSym + ":close";
-  toConsole("Built symbol base time series", ts);
+  var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, DiffFunction.delta);
+  toConsole("Built symbol base & target time series", ts, targetTs);
+  trainStrategy(ts, targetTs, getDatestampEpochTime("2014-01-01"));
+}
+
+function trainFundamentalStrategy(syms, targetSym) {
+  //var diffWin = 3;
+  //var varWin = 5;
+var diffWin = 2; // TODO testing
+var varWin = 0; // TODO testing
+  var forecastWin = 5;  // five trading days
+
+  var targetTs = getSymbolTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
+  var fundTs = selectTimeSeriesFeatures(getFundamentalTimeSeries(), function(t, featureName) {
+    var featureSym = featureName.split(":").slice(0, 2).join(":");
+    return syms.indexOf(featureSym) != -1;
+  });
+  var ts = mergeTimeSeries(fundTs, targetTs);
+  var targetFeatureName = targetSym + ":close";
   trainStrategy(ts, targetFeatureName, forecastWin, DiffFunction.delta, getDatestampEpochTime("2014-01-01"));
 }
 
 $(document).ready(function() {
-  trainTechnicalStrategy(["NFLX:NASDAQ", "WDC:NASDAQ"], "NFLX:NASDAQ");
-  //trainFundamentalStrategy();
+  var syms = ["NFLX:NASDAQ", "WDC:NASDAQ"];
+  var targetSym = "NFLX:NASDAQ";
+  trainTechnicalStrategy(syms, targetSym);
+  //trainFundamentalStrategy(syms, targetSym);
 });
 
 

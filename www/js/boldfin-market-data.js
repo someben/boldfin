@@ -60,6 +60,11 @@ function getStockPriceTimeSeries(ticker, exch) {
 }
 
 var fundamentalTs = {};
+
+function getFundamentalTimeSeries() {
+  return fundamentalTs;
+}
+
 function registerFundamentalData(o) {
   var t = getDatestampEpochTime(o["Date"]);
   if (! fundamentalTs[t]) {
