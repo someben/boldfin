@@ -36,6 +36,23 @@ function getDatestampEpochTime(s) {
   return new Date(s + "T16:30:00" + tz) / 1000;
 }
 
+function getEpochTimeDatestamp(t) {
+  var date = new Date(t * 1000);
+  var s = date.getFullYear();
+  s += "-";
+  var monthNum = date.getMonth() + 1;
+  if (monthNum < 10) {
+    s += "0";
+  }
+  s += monthNum;
+  s += "-";
+  if (date.getDate() < 10) {
+    s += "0";
+  }
+  s += date.getDate();
+  return s;
+}
+
 function toPrettyTimestamp(t) {
   return "" + (new Date(t * 1000));
 }

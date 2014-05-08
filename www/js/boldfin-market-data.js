@@ -10,13 +10,20 @@ You may obtain a copy of the License at
     limitations under the License.
 */
 
-function getQuandlStockPriceTimeSeries(ticker, exch) {
+function getQuandlStockPriceTimeSeries(ticker, exch, tStart) {
   var url = "http://www.quandl.com/api/v1/datasets/GOOG/" + exch + "_" + ticker;
+  var urlParams = [];
+  if (typeof tStart != "undefined") {
+    urlParams.push("trim_start=" + encodeURIComponent(getEpochTimeDatestamp(tStart)));
+  }
   if (getQuandlCredentials().authToken) {
-    url += "?auth_token=" + getQuandlCredentials().authToken;
+    urlParams.push("auth_token=" + encodeURIComponent(getQuandlCredentials().authToken));
   }
   else {
     toConsole("Requesting URL anonymously", url);
+  }
+  if (urlParams.length > 0) {
+    url += "?" + urlParams.join("&");
   }
 
   toConsole("About to call out to Quandl API w/ URL:", url);
@@ -32,9 +39,9 @@ function getQuandlStockPriceTimeSeries(ticker, exch) {
   return data;
 }
 
-function getStockPriceTimeSeries(ticker, exch) {
+function getStockPriceTimeSeries(ticker, exch, tStart) {
   var ts = {};
-  var quandlTs = getQuandlStockPriceTimeSeries(ticker, exch);
+  var quandlTs = getQuandlStockPriceTimeSeries(ticker, exch, tStart);
   for (var j=0; j < quandlTs.data.length; j++) {
     var tsRow = {};
     var tsRowTime = null;

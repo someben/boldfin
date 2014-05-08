@@ -127,7 +127,7 @@ function addVarFeatures(ts, featureName, varWin, varFn) {
   return newTs;
 };
 
-function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn) {
+function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn, tStart) {
   var ts = null;
   for (var i=0; i < syms.length; i++) {
     var sym = syms[i];
@@ -135,7 +135,7 @@ function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn) {
     var ticker = symEls[0];
     var exch = symEls[1];
 
-    var symTs = getStockPriceTimeSeries(ticker, exch);
+    var symTs = getStockPriceTimeSeries(ticker, exch, tStart);
     var featureNames = getTimeSeriesFeatureNames(symTs);
     for (var j=0; j < featureNames.length; j++) {
       var featureName = featureNames[j];
@@ -435,16 +435,16 @@ function selectFundamentalTimeSeriesSymbols(syms) {
   });
 }
 
-function trainStrategy(ts, targetTs, minTime) {
+function trainStrategy(ts, targetTs, tStart) {
   var minNumExamples = 20;
   var sparsityFilter = 0.50;
   var numTopFeatures = 3;
   var kNearest = 3;
   var maxNumTestSteps = 5;
 
-  if (typeof minTime != "undefined") {
-    ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= minTime; });
-    toConsole("Filtered to market data since", minTime, "time, now", getTimeSeriesLength(ts), "length");
+  if (typeof tStart != "undefined") {
+    ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= tStart; });
+    toConsole("Filtered to market data since", tStart, "time, now", getTimeSeriesLength(ts), "length");
   }
 
   var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
@@ -502,30 +502,32 @@ function trainStrategy(ts, targetTs, minTime) {
 };
 
 function trainTechnicalStrategy(syms, targetSym, diffWin, varWin, forecastWin) {
+  var tStart = getDatestampEpochTime("2014-01-01");
   var combSyms = syms;
   if (combSyms.indexOf(targetSym) == -1) {
     combSyms.push(targetSym);
   }
 
-  var ts = getSymbolTimeSeries(combSyms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
+  var ts = getSymbolTimeSeries(combSyms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev, tStart);
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, DiffFunction.delta);
   toConsole("Built symbol base & target time series", ts, targetTs);
-  trainStrategy(ts, targetTs, getDatestampEpochTime("2014-01-01"));
+  trainStrategy(ts, targetTs, tStart);
 }
 
 function trainFundamentalStrategy(syms, targetSym, diffWin, varWin, forecastWin) {
+  var tStart = getDatestampEpochTime("2013-01-01");
   var combSyms = syms;
   if (combSyms.indexOf(targetSym) == -1) {
     combSyms.push(targetSym);
   }
 
   var fundTs = selectFundamentalTimeSeriesSymbols(combSyms);
-  var targetBackTs = getSymbolTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
+  var targetBackTs = getSymbolTimeSeries([targetSym], diffWin, DiffFunction.delta, varWin, VarFunction.stdev, tStart);
   var targetFeatureName = targetSym + ":close";
   var targetTs = extractForecastTimeSeries(targetBackTs, targetFeatureName, forecastWin, DiffFunction.delta);
   toConsole("Built symbol fundamental & target time series", fundTs, targetTs);
-  trainStrategy(fundTs, targetTs, getDatestampEpochTime("2013-01-01"));
+  trainStrategy(fundTs, targetTs, tStart);
 }
 
 $(document).ready(function() {
@@ -536,7 +538,7 @@ $(document).ready(function() {
   var forecastWin = 5;  // five trading days
 
   trainTechnicalStrategy(syms, targetSym);
-  trainFundamentalStrategy(syms, targetSym);
+  //trainFundamentalStrategy(syms, targetSym);
 });
 
 
