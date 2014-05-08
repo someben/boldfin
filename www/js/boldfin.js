@@ -1,50 +1,18 @@
-function _getQuandlStockPriceTimeSeries(exch, ticker) {
-  var url = "http://www.quandl.com/api/v1/datasets/GOOG/" + exch + "_" + ticker;
-  if (getQuandlCredentials().authToken) {
-    url += "?auth_token=" + getQuandlCredentials().authToken;
-  }
-  else {
-    toConsole("Requesting URL anonymously", url);
-  }
+/*
+Copyright 2014 Ben Gimpert
 
-  toConsole("About to call out to Quandl API w/ URL:", url);
-  var data = null;
-  $.ajax({
-    url: url,
-    async: false,
-    success: function(ajaxResult) {
-      toConsole("Got data back from Quandl", ajaxResult);
-      data = ajaxResult;
-    }
-  });
-  return data;
-}
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-var tmpData = null;
-function tmpCallback(data) { tmpData = data; }
-function getQuandlStockPriceTimeSeries(exch, ticker) { return tmpData; }
-
-function getStockPriceTimeSeries(exch, ticker) {
-  var ts = {};
-  var quandlTs = getQuandlStockPriceTimeSeries(exch, ticker);
-  for (var j=0; j < quandlTs.data.length; j++) {
-    var tsRow = {};
-    var tsRowTime = null;
-    for (var i=0; i < quandlTs.column_names.length; i++) {
-      var featureName = quandlTs.column_names[i].toLowerCase();
-      var featureVal = quandlTs.data[j][i];
-      if (featureName == "date") {
-        var quandlTsRowTimeTz = ((new Date(featureVal).isDst()) ? "-04:00" : "-05:00");
-        tsRowTime = new Date(featureVal + "T16:30:00" + quandlTsRowTimeTz) / 1000;
-      }
-      else {
-        tsRow[featureName] = featureVal;
-      }
-    }
-    ts[tsRowTime] = tsRow;
-  }
-  return ts;
-}
+    http://www.apache.org/licenses/LICENSE-2.0
+    
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
 
 function cloneTimeSeriesRow(tsRow, featureNamePrefix) {
   var newTsRow = {}
@@ -76,6 +44,19 @@ function getTimeSeriesTimes(ts) {
   }
   tsTimes.sort();
   return tsTimes;
+}
+
+function mergeTimeSeries(ts1, ts2) {
+  var newTs = cloneTimeSeries(ts1);
+  for (var t in ts2) {
+    if (! newTs[t]) {
+      newTs[t] = {};
+    }
+    for (var featureName in ts2[t]) {
+      newTs[t][featureName] = ts2[t][featureName];
+    }
+  }
+  return newTs;
 }
 
 function getTimeSeriesRowFeatureNames(tsRow) {
@@ -145,19 +126,6 @@ function addVarFeatures(ts, featureName, varWin, varFn) {
   }
   return newTs;
 };
-
-function mergeTimeSeries(ts1, ts2) {
-  var newTs = cloneTimeSeries(ts1);
-  for (var t in ts2) {
-    if (! newTs[t]) {
-      newTs[t] = {};
-    }
-    for (var featureName in ts2[t]) {
-      newTs[t][featureName] = ts2[t][featureName];
-    }
-  }
-  return newTs;
-}
 
 function getSymbolTimeSeries(syms, diffWin, diffFn, varWin, varFn) {
   var ts = null;
@@ -243,15 +211,6 @@ function selectTimeSeriesFeatures(ts, fn) {
   return newTs;
 }
 
-function removeSparseTimeSeriesRows(ts, sparsityFilter) {
-  var minNumDims = Math.round(getTimeSeriesDimensionality(ts) * sparsityFilter);
-  ts = selectTimeSeriesRows(ts, function(t, tsRow) {
-    return getTimeSeriesRowFeatureNames(tsRow).length >= minNumDims;
-  });
-  toConsole("Filtered down to time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
-  return ts;
-}
-
 function mapTimeSeriesFeatureVals(ts, featureName, fn) {
   var newTs = {};
   var tsRowTimes = getTimeSeriesTimes(ts);
@@ -265,6 +224,15 @@ function mapTimeSeriesFeatureVals(ts, featureName, fn) {
     newTs[t][featureName] = newFeatureVal;
   }
   return newTs;
+}
+
+function removeSparseTimeSeriesRows(ts, sparsityFilter) {
+  var minNumDims = Math.round(getTimeSeriesDimensionality(ts) * sparsityFilter);
+  ts = selectTimeSeriesRows(ts, function(t, tsRow) {
+    return getTimeSeriesRowFeatureNames(tsRow).length >= minNumDims;
+  });
+  toConsole("Filtered down to time series w/ dimensionality & length", getTimeSeriesDimensionality(ts), getTimeSeriesLength(ts));
+  return ts;
 }
 
 function standardizeTimeSeries(ts) {
@@ -359,7 +327,7 @@ function rankTimeSeriesFeatures(contTs, contTargetTs) {
         }
       }
     }
-    toConsole("Mutual information for", featureName, featureInf);
+    toConsole("Mutual information for", featureName, featureInf, "versus", targetFeatureName);
     featureInfs[featureName] = featureInf;
   }
 
@@ -367,6 +335,52 @@ function rankTimeSeriesFeatures(contTs, contTargetTs) {
   sortedFeatureNames.reverse();
   toConsole("Features sorted by mutual information", sortedFeatureNames);
   return sortedFeatureNames;
+}
+
+function selectTimeSeriesFeatureMutualInfo(ts, targetTs, numTopFeatures) {
+  var topFeatureNames = rankTimeSeriesFeatures(ts, targetTs).slice(0, numTopFeatures);
+  return selectTimeSeriesFeatures(ts, function(t, featureName) { return topFeatureNames.indexOf(featureName) != -1 });
+}
+
+function getTimeSeriesRowSim(featureNames, a, b) {
+  // cosine distance, to better handle sparsity
+  var cosNumer = 0;
+  var aCosDenom = 0;
+  var bCosDenom = 0;
+  for (var i=0; i < featureNames.length; i++) {
+    var featureName = featureNames[i];
+    var aVal = 0;
+    if (a[featureName]) {
+      aVal = a[featureName];
+    }
+    var bVal = 0;
+    if (b[featureName]) {
+      bVal = b[featureName];
+    }
+    cosNumer += aVal * bVal;
+    aCosDenom += aVal * aVal;
+    bCosDenom += bVal * bVal;
+  }
+  aCosDenom = Math.sqrt(aCosDenom);
+  bCosDenom = Math.sqrt(bCosDenom);
+  return cosNumer / (aCosDenom * bCosDenom);
+}
+
+function getNearestTimeSeries(ts, targetTsRow, n) {
+  var featureNames = getTimeSeriesFeatureNames(ts);
+  var tsRowTimes = getTimeSeriesTimes(ts);
+  var sims = {};
+  for (var i=0; i < tsRowTimes.length; i++) {
+    var tsRowTime = tsRowTimes[i];
+    var tsRow = ts[tsRowTime];
+    var sim = getTimeSeriesRowSim(featureNames, targetTsRow, tsRow);
+    sims[tsRowTime] = sim;
+  }
+  var sortedTsRowTimes = getSortedKeys(sims);
+  sortedTsRowTimes.reverse();
+  sortedTsRowTimes = sortedTsRowTimes.slice(0, n);
+  var nearestTs = selectTimeSeriesRows(ts, function(t, tsRow) { return sortedTsRowTimes.indexOf(t) != -1 });
+  return nearestTs;
 }
 
 $(document).ready(function() {
@@ -381,6 +395,7 @@ var varWin = 0; // TODO testing
   var forecastWin = 5;  // five trading days
   var sparsityFilter = 0.50;
   var numTopFeatures = 3;
+  var kNearest = 3;
 
   var deltaFn = function(x1, x2) {
     return (x2 - x1) / x1;
@@ -406,8 +421,22 @@ ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= 1388563200 }); //
   toConsole("Standardized time series", stdTs, stdTargetTs);
 
   stdTs = removeSparseTimeSeriesRows(stdTs, sparsityFilter);
-  var topFeatureNames = rankTimeSeriesFeatures(stdTs, stdTargetTs).slice(0, numTopFeatures);
-  stdTs = selectTimeSeriesFeatures(stdTs, function(t, featureName) { return topFeatureNames.indexOf(featureName) != -1 });
+  stdTs = selectTimeSeriesFeatureMutualInfo(stdTs, stdTargetTs, numTopFeatures);
   toConsole("Selected time series", stdTs);
+
+  var targetFeatureName = getTimeSeriesFeatureNames(targetTs)[0];
+  var tsRowTimes = getTimeSeriesTimes(stdTs);
+  for (var i=0; i < tsRowTimes.length; i++) {
+    var tsRowTime = tsRowTimes[i];
+
+    var nearestTs = getNearestTimeSeries(stdTs, stdTs[tsRowTime], kNearest);
+    var nearestTsRowTimes = getTimeSeriesTimes(nearestTs);
+    var nearestTargetTs = selectTimeSeriesRows(targetTs, function(t, tsRow) { return nearestTsRowTimes.indexOf(t) != -1 });
+
+    var preds = [];
+    mapTimeSeriesFeatureVals(nearestTargetTs, targetFeatureName, function(t, featureVal) { preds.push(featureVal); });
+    var meanPred = Dist.getMean(preds);
+    toConsole("At time", toPrettyTimestamp(tsRowTime), "found", getTimeSeriesLength(nearestTargetTs), "of", kNearest, "near targets", nearestTargetTs, "prediction", meanPred);
+  }
 });
 
