@@ -103,3 +103,18 @@ var Dist = {
   }
 };
 
+var DiffFunction = {
+  delta: function(x1, x2) {
+    return (x2 - x1) / x1;
+  },
+  logRet: function(x1, x2) {
+    return Math.log(x2 / x1);
+  }
+};
+
+var VarFunction = {
+  stdev: function(xs) {
+    return Dist.getStandardDeviation(xs);
+  }
+};
+

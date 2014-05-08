@@ -425,40 +425,17 @@ function getTimeSeriesPrediction(ts, targetTs, testTs, testTargetTs, kNearest) {
   };
 }
 
-function trainTechnicalStrategy() {
-  var syms = ["NFLX:NASDAQ", "WDC:NASDAQ"];
-  var targetSym = syms[0];
-  var targetFeatureName = targetSym + ":close";
-
-  //var diffWin = 3;
-  //var varWin = 5;
-var diffWin = 2; // TODO testing
-var varWin = 0; // TODO testing
-  var forecastWin = 5;  // five trading days
+function trainStrategy(ts, targetFeatureName, forecastWin, forecastDiffFn, minTime) {
   var minNumExamples = 20;
   var sparsityFilter = 0.50;
   var numTopFeatures = 3;
   var kNearest = 3;
-  var minTime = getDatestampEpochTime("2014-01-01");
   var maxNumTestSteps = 5;
 
-  var deltaFn = function(x1, x2) {
-    return (x2 - x1) / x1;
-  };
-  var logRetFn = function(x1, x2) {
-    return Math.log(x2 / x1);
-  };
-  var stdevFn = function(xs) {
-    return Dist.getStandardDeviation(xs);
-  };
-
-  var ts = getSymbolTimeSeries(syms, diffWin, deltaFn, varWin, stdevFn);
-  if (minTime) {
+  if (typeof minTime != "undefined") {
     ts = selectTimeSeriesRows(ts, function(t, tsRow) { return t >= minTime; });
     toConsole("Filtered to market data since time", minTime);
   }
-  var targetTs = extractForecastTimeSeries(ts, targetFeatureName, forecastWin, deltaFn);
-  toConsole("Built symbol base & target time series", ts, targetTs);
 
   var predTargets = []; var actualTargets = [];
   var tsRowTimes = getTimeSeriesTimes(ts);
@@ -467,7 +444,7 @@ var varWin = 0; // TODO testing
     var nowTime = tsRowTimes[i];
 
     var trainTs = selectTimeSeriesRows(ts, function(t, tsRow) { return t <= nowTime; });
-    var trainTargetTs = extractForecastTimeSeries(trainTs, targetFeatureName, forecastWin, deltaFn);
+    var trainTargetTs = extractForecastTimeSeries(trainTs, targetFeatureName, forecastWin, forecastDiffFn);
     if (getTimeSeriesLength(trainTs) < minNumExamples) {
       continue;
     }
@@ -486,7 +463,7 @@ var varWin = 0; // TODO testing
     toConsole("Selected time series", stdTrainTs);
 
     var testTs = selectTimeSeriesRows(ts, function(t, tsRow) { return t > nowTime; });
-    var testTargetTs = extractForecastTimeSeries(testTs, targetFeatureName, forecastWin, deltaFn);
+    var testTargetTs = extractForecastTimeSeries(testTs, targetFeatureName, forecastWin, forecastDiffFn);
     toConsole("Selected testing time series", testTs, testTargetTs);
 
     result = standardizeTimeSeries(testTs, trainFeatureDist);
@@ -499,8 +476,11 @@ var varWin = 0; // TODO testing
       actualTargets.push(result.actualTarget);
     }
 
-    var corr = Dist.getCorrelation(predTargets, actualTargets);
-    toConsole("Found", corr, "correlation over", predTargets.length, "out-of-sample backtest steps");
+    if (predTargets.length >= 2) {
+      var corr = Dist.getCorrelation(predTargets, actualTargets);
+      toConsole("Found", corr, "correlation over", predTargets.length, "out-of-sample backtest steps");
+    }
+
     if (maxNumTestSteps && (numTestSteps >= maxNumTestSteps)) {
       toConsole("Breaking early after", numTestSteps, "attempted out-of-sample backtest steps");
       break;
@@ -508,8 +488,22 @@ var varWin = 0; // TODO testing
   }
 };
 
+function trainTechnicalStrategy(syms, targetSym) {
+  //var diffWin = 3;
+  //var varWin = 5;
+var diffWin = 2; // TODO testing
+var varWin = 0; // TODO testing
+  var forecastWin = 5;  // five trading days
+
+  var ts = getSymbolTimeSeries(syms, diffWin, DiffFunction.delta, varWin, VarFunction.stdev);
+  var targetFeatureName = targetSym + ":close";
+  toConsole("Built symbol base time series", ts);
+  trainStrategy(ts, targetFeatureName, forecastWin, DiffFunction.delta, getDatestampEpochTime("2014-01-01"));
+}
+
 $(document).ready(function() {
-  trainTechnicalStrategy();
+  trainTechnicalStrategy(["NFLX:NASDAQ", "WDC:NASDAQ"], "NFLX:NASDAQ");
+  //trainFundamentalStrategy();
 });
 
 
