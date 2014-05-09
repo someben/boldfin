@@ -467,6 +467,48 @@ function selectFundamentalTimeSeriesSymbols(syms) {
   });
 }
 
+function evalStrategy(predTargets, actualTargets) {
+  if (predTargets.length < 2) {
+    return;
+  }
+
+  var hits = []; var rets = [];
+  for (var i=0; i < predTargets.length; i++) {
+    var predTarget = predTargets[i];
+    var actualTarget = actualTargets[i];
+    if (((predTarget < 0) && (actualTarget < 0)) || ((predTarget > 0) && (actualTarget > 0)) || ((predTarget == 0) && (actualTarget == 0))) {
+      hits.push(1);
+    }
+    else {
+      hits.push(0);
+    }
+
+    if (predTarget > 0) {
+      rets.push(actualTarget);
+    }
+    else if (predTarget < 0) {
+      rets.push(-actualTarget);
+    }
+    else {
+      rets.push(0);
+    }
+  }
+  var corr = Dist.getCorrelation(predTargets, actualTargets);
+  var hitRatio = Dist.getMean(hits);
+  var vol = Dist.getStandardDeviation(rets);
+  var risklessRate = 0;  // in this environment!
+  var sharpeRatio = Math.sqrt(252) * ((Dist.getMean(rets) - risklessRate) / Dist.getStandardDeviation(rets));
+  var maxDrawdown = Dist.getMin(rets);
+  toConsole("Over", predTargets.length, "out-of-sample steps, found:", corr, "correlation,", hitRatio, "hit ratio,", vol, "daily volatility,", sharpeRatio, "annualized daily-frequency Sharpe ratio,", maxDrawdown, "maximum drawdown");
+  return {
+    corr: corr,
+    hitRatio: hitRatio,
+    vol: vol,
+    sharpeRatio: sharpeRatio,
+    maxDrawdown: maxDrawdown,
+  };
+}
+
 function trainStrategy(ts, targetTs, tStart) {
   var minNumExamples = 20;
   var sparsityFilter = 0.35;
@@ -520,11 +562,7 @@ function trainStrategy(ts, targetTs, tStart) {
       actualTargets.push(result.actualTarget);
     }
 
-    if (predTargets.length >= 2) {
-      var corr = Dist.getCorrelation(predTargets, actualTargets);
-      toConsole("Found", corr, "correlation over", predTargets.length, "out-of-sample backtest steps");
-    }
-
+    evalStrategy(predTargets, actualTargets);
     if (maxNumTestSteps && (numTestSteps >= maxNumTestSteps)) {
       toConsole("Breaking early after", numTestSteps, "attempted out-of-sample backtest steps");
       break;
